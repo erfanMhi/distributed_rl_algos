@@ -1,0 +1,47 @@
+defaults:
+  - _self_
+  - override hydra/hydra_logging: disabled
+  - override hydra/job_logging: disabled
+
+env:
+  id: "CartPole-v1"
+
+algorithm:
+  # General parameters
+  name: "adqn"
+  device: "cpu"
+  seed: 42
+  num_workers: 16
+  gamma: 0.99
+  target_update_frequency: 512
+  max_rollout_length: 5
+  total_timesteps: 1000000
+
+  # Network architecture
+  network:
+    type: "mlp"  # Options: mlp, nature_cnn, recurrent
+    hidden_sizes: [32]
+
+  # Optimizer configuration
+  optimizer:
+    learning_rate: 5e-3
+    final_learning_rate: 0.0
+    adam_beta1: 0.9
+    adam_beta2: 0.999
+    adam_weight_decay: 0.0
+    adam_amsgrad: false
+    max_grad_norm: 1.0
+    log_params_norm: true
+
+  # Exploration settings
+  exploration:
+    epsilon_values: [0.1, 0.01, 0.25]
+    epsilon_probabilities: [0.4, 0.3, 0.3]
+    epsilon_annealing_length: 1000000
+
+
+
+wandb:
+  track: true
+  project: "adqn"
+  run_name: "test_run"
