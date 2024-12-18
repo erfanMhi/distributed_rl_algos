@@ -260,7 +260,7 @@ class AsynchronousDQNALearnerProcess(mp.Process):
             else:
                 return model(torch.tensor(obs)).argmax(dim=0)
     
-    def _rollout(self, model: nn.Module) -> Tuple[List[float], List[bool], List[torch.Tensor]]:
+    def _rollout(self, model: nn.Module) -> Tuple[List[float], List[torch.Tensor]]:
         """
         Perform a rollout in the environment using the current policy.
         
@@ -270,11 +270,9 @@ class AsynchronousDQNALearnerProcess(mp.Process):
         Returns:
             A tuple containing:
             - List of rewards received
-            - List of done flags
             - List of observations
         """
         reward_buffer = []
-        done_buffer = []
         obs_buffer = [self._last_obs]
         
         rollout_start_step = self._rollout_step
@@ -287,7 +285,6 @@ class AsynchronousDQNALearnerProcess(mp.Process):
     
             # Store transition
             reward_buffer.append(reward)
-            done_buffer.append(self._done)
             obs_buffer.append(self._last_obs)
 
             # Update step counters
@@ -295,17 +292,15 @@ class AsynchronousDQNALearnerProcess(mp.Process):
             with self._global_step.get_lock():
                 self._global_step.value += 1
 
-        return reward_buffer, done_buffer, obs_buffer
+        return reward_buffer, obs_buffer
     
-    def _train_model(self, model: nn.Module, reward_buffer: List[float], 
-                    done_buffer: List[bool], obs_buffer: List[torch.Tensor]) -> None:
+    def _train_model(self, model: nn.Module, reward_buffer: List[float], obs_buffer: List[torch.Tensor]) -> None:
         """
         Update the model using collected experience.
         
         Args:
             model: The local model to update
             reward_buffer: List of rewards from the rollout
-            done_buffer: List of done flags from the rollout
             obs_buffer: List of observations from the rollout
         """
         # Calculate bootstrap value
@@ -386,14 +381,14 @@ class AsynchronousDQNALearnerProcess(mp.Process):
             model.load_state_dict(self._shared_model.state_dict())
 
             # Collect experience
-            reward_buffer, done_buffer, obs_buffer = self._rollout(model)
+            reward_buffer, obs_buffer = self._rollout(model)
 
             # Update episode statistics
             episode_return += sum(reward_buffer)
             episode_length += len(reward_buffer)
 
             # Update model
-            self._train_model(model, reward_buffer, done_buffer, obs_buffer)
+            self._train_model(model, reward_buffer, obs_buffer)
 
             # Update target network periodically
             if self._global_step.value % self._target_update_frequency == 0:
