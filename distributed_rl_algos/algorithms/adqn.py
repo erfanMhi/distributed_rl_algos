@@ -17,6 +17,7 @@ import random
 from typing import List, Callable, Any, Dict, Tuple, Optional
 from omegaconf import DictConfig
 
+import numpy as np
 import wandb
 import torch
 import torch.nn as nn
@@ -215,6 +216,10 @@ class AsynchronousDQNALearnerProcess(mp.Process):
         """Set random seeds for reproducibility."""
         torch.manual_seed(self._seed + self._rank)
         torch.cuda.manual_seed_all(self._seed + self._rank)
+        random.seed(self._seed + self._rank)
+        np.random.seed(self._seed + self._rank)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
     def _create_model(self) -> nn.Module:
         """
@@ -260,7 +265,7 @@ class AsynchronousDQNALearnerProcess(mp.Process):
             else:
                 return model(torch.tensor(obs)).argmax(dim=0)
     
-    def _rollout(self, model: nn.Module) -> Tuple[List[float], List[torch.Tensor]]:
+    def _rollout(self, model: nn.Module) -> Tuple[List[float], List[torch.Tensor], List[int]]:
         """
         Perform a rollout in the environment using the current policy.
         
@@ -271,10 +276,11 @@ class AsynchronousDQNALearnerProcess(mp.Process):
             A tuple containing:
             - List of rewards received
             - List of observations
+            - List of actions
         """
         reward_buffer = []
         obs_buffer = [self._last_obs]
-        
+        actions_buffer = []
         rollout_start_step = self._rollout_step
 
         while not self._done and self._rollout_step - rollout_start_step != self._max_rollout_length:
@@ -286,15 +292,16 @@ class AsynchronousDQNALearnerProcess(mp.Process):
             # Store transition
             reward_buffer.append(reward)
             obs_buffer.append(self._last_obs)
+            actions_buffer.append(action.item())
 
             # Update step counters
             self._rollout_step += 1
             with self._global_step.get_lock():
                 self._global_step.value += 1
 
-        return reward_buffer, obs_buffer
+        return reward_buffer, obs_buffer, actions_buffer
     
-    def _train_model(self, model: nn.Module, reward_buffer: List[float], obs_buffer: List[torch.Tensor]) -> None:
+    def _train_model(self, model: nn.Module, reward_buffer: List[float], obs_buffer: List[torch.Tensor], actions_buffer: List[int]) -> None:
         """
         Update the model using collected experience.
         
@@ -302,6 +309,7 @@ class AsynchronousDQNALearnerProcess(mp.Process):
             model: The local model to update
             reward_buffer: List of rewards from the rollout
             obs_buffer: List of observations from the rollout
+            actions_buffer: List of actions from the rollout
         """
         # Calculate bootstrap value
         if self._done:
@@ -311,14 +319,14 @@ class AsynchronousDQNALearnerProcess(mp.Process):
                 R = self._shared_target_model(torch.tensor(obs_buffer[-1])).max(dim=0).values.item()
 
         # Calculate value loss
-        value_loss = torch.tensor(0.0, device=self._device)
+        q_value_loss = torch.tensor(0.0, device=self._device)
         for i in range(len(reward_buffer) - 1, -1, -1):
             R = reward_buffer[i] + self._gamma * R
-            value_loss += (R - model(torch.tensor(obs_buffer[i])).max(dim=0).values) ** 2
+            q_value_loss += (R - model(torch.tensor(obs_buffer[i]))[actions_buffer[i]]) ** 2
 
         # Update shared model
         self._shared_optimizer.zero_grad()
-        value_loss.backward()
+        q_value_loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), self._max_grad_norm)
 
         for param, shared_param in zip(model.parameters(), self._shared_model.parameters()):
@@ -381,14 +389,14 @@ class AsynchronousDQNALearnerProcess(mp.Process):
             model.load_state_dict(self._shared_model.state_dict())
 
             # Collect experience
-            reward_buffer, obs_buffer = self._rollout(model)
+            reward_buffer, obs_buffer, actions_buffer = self._rollout(model)
 
             # Update episode statistics
             episode_return += sum(reward_buffer)
             episode_length += len(reward_buffer)
 
             # Update model
-            self._train_model(model, reward_buffer, obs_buffer)
+            self._train_model(model, reward_buffer, obs_buffer, actions_buffer)
 
             # Update target network periodically
             if self._global_step.value % self._target_update_frequency == 0:
