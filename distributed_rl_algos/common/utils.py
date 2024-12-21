@@ -5,14 +5,20 @@ import torch
 import numpy as np
 from typing import Dict, List, Tuple, Union, Any, Optional
 import wandb  # Import wandb
-
+import random
 from torch.optim.optimizer import ParamsT
 
-def set_seed(seed: int) -> None:
+def set_global_seed(seed: int, fully_deterministic: bool = False) -> None:
     """Set random seeds for reproducibility."""
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
     np.random.seed(seed)
+    random.seed(seed)
+
+    # Optional: for complete determinism
+    if fully_deterministic:
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
 def create_optimizer(
     parameters: Any,

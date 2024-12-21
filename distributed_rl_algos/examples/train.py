@@ -20,10 +20,10 @@ from distributed_rl_algos.common.env_wrappers import (
     EpisodeMonitor,
     NormalizeObservation
 )
-from distributed_rl_algos.common.utils import set_seed
+from distributed_rl_algos.common.utils import set_global_seed
 from distributed_rl_algos.algorithms import BaseRLAlgorithm
 from distributed_rl_algos.algorithms import AsynchronousDQNLearner
-
+from distributed_rl_algos.algorithms import A3CLearner
 
 def make_env(
     env_id: str,
@@ -74,6 +74,7 @@ def get_algorithm_class(algo_name: str) -> Type[BaseRLAlgorithm]:
     """
     algorithms = {
         "adqn": AsynchronousDQNLearner,
+        "a3c": A3CLearner,
     }
     
     if algo_name not in algorithms:
@@ -83,7 +84,7 @@ def get_algorithm_class(algo_name: str) -> Type[BaseRLAlgorithm]:
     return algorithms[algo_name]
 
 
-@hydra.main(version_base=None, config_path="../config", config_name="adqn")
+@hydra.main(version_base=None, config_path="../config", config_name="a3c")
 def main(cfg: DictConfig) -> None:
     """Main training function.
     
@@ -91,7 +92,7 @@ def main(cfg: DictConfig) -> None:
         cfg: Hydra configuration object containing all training parameters.
     """
     # Set random seeds for reproducibility
-    set_seed(cfg.algorithm.seed)
+    set_global_seed(cfg.algorithm.seed, fully_deterministic=True)
     
     # Initialize the specified algorithm
     algo_cls = get_algorithm_class(cfg.algorithm.name)
